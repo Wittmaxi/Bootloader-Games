@@ -52,78 +52,72 @@ STARTUP ENDP                                      ;
 ; ax = y                                          ;
 ; dx = tile                                       ;
 ;-( notes )---------------------------------------;
-; o one tile is 4x4 big                           ;
+; o one tile is 4x4 blocks big                    ;
 ; o one block is 3x3 big                          ;
 ;-------------------------------------------------;
 DRAWTILE PROC                                     ;
-    MOV cx, 4                                     ;
-@@y:                                              ;
+    ;- loop over each row                         ;
+    MOV cx, 0304H                                 ; store the column in CL and in CH, store hwo many pixels of height we already have drawn
+@@rowsLoop:                                       ;
+    OR ch, ch                                     ; did we underflow on the calculation of "repeating columns?"
+    JNZ @@noUnderflow                             ;
+    MOV ch, 03H                                   ;
+@@noUnderflow:                                    ;
+    PUSH dx                                       ;
     PUSH cx                                       ;
-    MOV cx, 4
-@@x:                                              ;
+    ;- calculate new offset in grahpics buf       ;
+    PUSH ax                                       ;
+    MUL BYTE PTR [screenWidth]                    ;
+    MOV di, ax                                    ;
+    POP ax                                        ;
+    ;-- add x                                     ;
+    ADD di, bx                                    ;
+                                                  ;
+    ;- for each cell                              ;
+    MOV cx, 4                                     ;
+@@colLoop:                                        ;
+    ;-- in each cell, loop through the four coor bits
     PUSH dx                                       ;
     AND dx, 01000000000000000B                    ;
     POP dx                                        ;
-    JZ @@noTile                                   ;
-    CALL DRAWBOX                                  ;
-@@noTile:                                         ;
-                                                  ;
-    ADD bx, 3                                     ;
+    JZ @@noTileHere                               ;
+    ;--- draw the actual tile                     ;
+    MOV WORD PTR es:[di], 0505H                   ; unrolled loop takes less bytes
+    ADD di, 2                                     ;
+    MOV BYTE PTR es:[di], 5                       ;
+    JMP @@tileDrawn                               ;
+@@noTileHere:                                     ;
+    INC di                                        ;
+    INC di                                        ;
+@@tileDrawn:                                      ;
+    INC di                                        ;
     SHL dx, 1                                     ;
-    LOOP @@x                                      ;
+    LOOP @@colLoop                                ;
                                                   ;
-    ADD ax, 3                                     ;
-    SUB bx, 3 * 4                                 ;
+    ;-- end of cell loop -------------------------;
     POP cx                                        ;
-    LOOP @@y                                      ;
-    RET                                           ;
+    DEC ch                                        ;
+    OR ch, ch                                     ;
+    JZ @@noRepeatCol                              ;
+    INC cl                                        ;
+    POP dx                                        ;
+    JMP @@repeatingCol                            ;
+@@noRepeatCol:                                    ; because we want to repeat each column 3 times (3x3 for one tile!)
+    SUB sp, 2                                     ; discard the old DX
+@@repeatingCol:                                   ;
+    INC ax
+    LOOP @@rowsLoop                               ;
+
+    MOV cx, 0b00bH
+
+    RET
 DRAWTILE ENDP                                     ;
 
-;-------------------------------------------------;
-; DRAW BOX                                        ;
-;-( input )---------------------------------------;
-; bx = x                                          ;
-; ax = y                                          ;
-;-( notes )---------------------------------------;
-; o one box is 3x3 big                            ;
-;-------------------------------------------------;
-DRAWBOX PROC                                      ;
-    PUSH ax                                       ; can this be optimized out?
-    PUSH bx                                       ;
-    PUSH cx                                       ;
-    PUSH dx                                       ;
-                                                  ;
-    ;- draw 50x50                                 ;
-    MOV cx, 3                                     ;
-    MOV bx, 320 / 4                               ;
-@@block:                                          ;
-    PUSH cx                                       ;
-    MOV cx, 03                                    ;
-    ;- calculate pixel offset in map              ;
-    PUSH ax                                       ;
-    MUL bx                                        ; y * 640
-    ADD ax, bx                                    ; + offset
-    MOV si, ax                                    ;
-    POP ax                                        ;
-@@line:                                           ;
-    MOV es:[si], 0FH                              ;
-    INC si                                        ;
-    LOOP @@line                                   ;
-                                                  ;
-    INC ax                                        ;
-    POP cx                                        ;
-    LOOP @@block                                  ;
-                                                  ;
-    POP dx                                        ;
-    POP cx                                        ;
-    POP bx                                        ;
-    POP ax                                        ;
-    RET                                           ;
-DRAWBOX ENDP                                      ;
-                                                  ;
 TILE_block:                                       ;
-    DB 011101100B                                 ;
-    DB 011001100B                                 ;
+    DB 010011000B                                 ;
+    DB 011001010B                                 ;
+screenWidth:                                      ;
+    DB 320/4                                      ;
                                                   ;
     ORG 510                                       ;
     DW 0AA55H                                     ;
