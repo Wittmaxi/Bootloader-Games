@@ -30,26 +30,18 @@ STARTUP PROC                                      ;
     MOV ax, 0006H                                 ; CGA mode https://www.fountainware.com/EXPL/video_modes.htm
     INT 10H                                       ;
                                                   ;
-    ;- setup variables                            ;
-    MOV WORD PTR es:[CURRENT_POSITION_Y], 0       ;
-    MOV WORD PTR es:[CURRENT_POSITION_X], 0       ;
     ;- set ES to display buffer                   ;
     MOV ax, 0b800H                                ;
     MOV es, ax                                    ;
     MOV di, 0                                     ;
-
-    CALL PICKTILE
-
-@@gameLoop:
-    MOV ax, WORD PTR es:[CURRENT_POSITION_Y]
-    MOV bx, WORD PTR es:[CURRENT_POSITION_X]
-    MOV dx, WORD PTR [CURRENT_TILE]
-    CALL DRAWTILE
-
-    ;- wait loop                                  ;
-    MOV cx, 08                                    ;
-@@:                                               ;
                                                   ;
+    CALL NEWTILE                                  ;
+                                                  ;
+    HLT                                           ;
+@@gameLoop:                                       ;
+    ;- wait loop                                  ;
+    MOV cx, 65000                                 ;
+@@@waitLoop:                                      ;
     ;-- get keyboard scancode                     ;
     MOV ah, 01                                    ;
     INT 16H                                       ;
@@ -59,23 +51,45 @@ STARTUP PROC                                      ;
     ;--- move to the left?                        ;
     SUB al, 'h'                                   ;
     JNZ @F                                        ;
+    ;--- are we allowed to move to the left?      ;
+    CMP es:[CURRENT_POSITION_X], 0                ;
+    JL @F                                         ;
+    ;--- move to the left!                        ;
     DEC WORD PTR es:[CURRENT_POSITION_X]          ;
 @@:                                               ;
     ;--- move to the right?                       ;
     SUB al, 'l' - 'h'                             ;
     JNZ @F                                        ;
+    ;--- are we allowed to move to the right?     ;
+    CMP es:[CURRENT_POSITION_X], 4 * 3            ;
+    JGE @F                                        ;
+    ;--- move to the right!                       ;
     INC WORD PTR es:[CURRENT_POSITION_X]          ;
 @@:                                               ;
 @@noKey:                                          ;
-    HLT                                           ;
-    LOOP @B                                       ;
+    LOOP @@waitLoop                                ;
+    HLT
+                                                  ;
+    MOV ax, WORD PTR es:[CURRENT_POSITION_Y]      ;
+    MOV bx, WORD PTR es:[CURRENT_POSITION_X]      ;
+    MOV dx, WORD PTR es:[CURRENT_TILE]            ;
+    CALL DRAWTILE                                 ;
                                                   ;
     ;- end of loop: prepare next loop             ;
     INC WORD PTR es:[CURRENT_POSITION_Y]          ;
+
+    ;- was there a collision?                     ;
+    CMP es:[COLLISION_EVENT], 1                   ;
+    JE @@nextTile                                 ;
+    ;- bounds checking                            ;
+    ;-- is the tile too low?                      ;
     CMP es:[CURRENT_POSITION_Y], 20 * 2           ;
     JLE @F                                        ;
+    ;-- get a new tile and fill current tile!     ;
+@@nextTile:                                       ;
     CALL CONSOLIDATETILE                          ;
-@@:
+    CALL NEWTILE                                  ;
+@@:                                               ;
     CALL CLEAROLDPLAYTILE                         ;
     JMP @@gameLoop
 
@@ -90,21 +104,34 @@ STARTUP ENDP                                      ;
 ; picks a tile, based on the CPU cycles counter   ;
 ;-------------------------------------------------;
 PICKTILE PROC                                     ;
+    ;- get random source == time                  ;
+    XOR ax, ax                                    ;
     INT 01AH                                      ;
+    ;- get module (% 8)                           ; we have 8 tiles!
     MOV al, dl                                    ;
-    SHR cl, 1
-    SHR cl, 1
-    SHR cl, 1
-    XCHG al, dl                                   ;
     CWD                                           ;
-    SHL al, 1
-    SHL al, 1
-
-    MOV bx, WORD PTR [ALL_TILES + al]
+    MOV cx, 08H                                   ;
+    DIV cx                                        ;
+                                                  ;
+    ;- get tile address                           ;
+    SHL dl, 1                                     ;
+    ;- load tile                                  ;
+    MOV bx, WORD PTR [ALL_TILES + dl]             ;
     MOV es:[CURRENT_TILE], bx                     ;
-
-    RET
+                                                  ;
+    RET                                           ;
 PICKTILE ENDP                                     ;
+                                                  ;
+                                                  ;
+;-------------------------------------------------;
+; NEWTILE                                         ;
+;-------------------------------------------------;
+NEWTILE PROC                                      ;
+    CALL PICKTILE                                 ;
+    MOV es:[CURRENT_POSITION_Y], 0                ;
+    MOV es:[CURRENT_POSITION_x], 6                ;
+    RET                                           ;
+NEWTILE ENDP                                      ;
                                                   ;
 ;-------------------------------------------------;
 ; CLEAROLDPLAYTILE                                ;
@@ -196,8 +223,6 @@ DRAWTILE PROC                                     ;
     ;- check: was there a collision?              ;
     CMP BYTE PTR es:[COLLISION_EVENT], 1          ;
     JNE @F                                        ;
-    ;-- there was! Let's consolidate and generate a new tile
-    CALL CONSOLIDATETILE                          ;
 @@:                                               ;
                                                   ;
     RETN                                          ;
